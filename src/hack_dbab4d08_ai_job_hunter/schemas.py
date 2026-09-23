@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +13,7 @@ class RecommendationRequest(BaseModel):
 
     duration_hours: int | None = Field(default=None, gt=0)
     language: str | None = None
+    preferences: str | None = None
 
 
 class ContractorRecommendation(BaseModel):
@@ -20,11 +22,30 @@ class ContractorRecommendation(BaseModel):
     category: str
     city: str
     price_from_kzt: int
+    languages: list[str]
+
+    score: float
+    semantic_score: float
+
     explanation: str
 
 
+class RejectionStats(BaseModel):
+    wrong_format: int
+    over_budget: int
+    busy: int
+    duration: int
+
+
 class RecommendationResponse(BaseModel):
-    status: str
+    status: Literal[
+        "success",
+        "category_not_found",
+        "no_matches",
+    ]
+
     count: int
-    recommendations: list[ContractorRecommendation]
     message: str | None = None
+
+    rejection_stats: RejectionStats | None = None
+    contractors: list[ContractorRecommendation]

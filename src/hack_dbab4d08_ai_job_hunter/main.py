@@ -1,16 +1,19 @@
 from fastapi import FastAPI
 
 from hack_dbab4d08_ai_job_hunter.data_loader import load_contractors
+from hack_dbab4d08_ai_job_hunter.diagnostics import (
+    build_no_matches_message,
+    get_rejection_stats,
+)
 from hack_dbab4d08_ai_job_hunter.explanations import build_explanation
 from hack_dbab4d08_ai_job_hunter.filters import (
     category_exists_in_city,
     filter_contractors,
 )
 from hack_dbab4d08_ai_job_hunter.ranking import rank_contractors
-from hack_dbab4d08_ai_job_hunter.schemas import RecommendationRequest
-from hack_dbab4d08_ai_job_hunter.diagnostics import (
-    build_no_matches_message,
-    get_rejection_stats,
+from hack_dbab4d08_ai_job_hunter.schemas import (
+    RecommendationRequest,
+    RecommendationResponse,
 )
 
 
@@ -19,10 +22,15 @@ app = FastAPI()
 contractors = load_contractors()
 
 
-@app.post("/recommend")
+@app.post(
+    "/recommend",
+    response_model=RecommendationResponse,
+)
 def recommend(request: RecommendationRequest):
-    # Проверяем, существует ли такая категория в выбранном городе
-    category_exists = category_exists_in_city(contractors, request)
+    category_exists = category_exists_in_city(
+        contractors,
+        request,
+    )
 
     if not category_exists:
         return {
@@ -35,31 +43,58 @@ def recommend(request: RecommendationRequest):
             "contractors": [],
         }
 
-    # Применяем все жёсткие фильтры
-    filtered = filter_contractors(contractors, request)
+    filtered = filter_contractors(
+        contractors,
+        request,
+    )
 
-    # Категория есть, но никто не прошёл условия
     if filtered.empty:
-        stats = get_rejection_stats(contractors, request)
+        stats = get_rejection_stats(
+            contractors,
+            request,
+        )
 
-    return {
-        "status": "no_matches",
-        "count": 0,
-        "message": build_no_matches_message(stats),
-        "rejection_stats": stats,
-        "contractors": [],
-    }
+        return {
+            "status": "no_matches",
+            "count": 0,
+            "message": build_no_matches_message(stats),
+            "rejection_stats": stats,
+            "contractors": [],
+        }
 
-    # Ранжируем оставшихся кандидатов
-    ranked = rank_contractors(filtered, request)
+    ranked = rank_contractors(
+        filtered,
+        request,
+    )
 
-    # Берём максимум 3
     top_contractors = ranked.head(3).copy()
 
-    # Создаём объяснение
-    top_contractors["explanation"] = top_contractors.apply(
-        lambda contractor: build_explanation(contractor, request),
-        axis=1,
+    top_contractors["score"] = (
+        top_contractors["score"].round(2)
+    )
+
+    top_contractors["semantic_score"] = (
+        top_contractors["semantic_score"].round(3)
+    )
+
+    top_contractors["explanation"] = (
+        top_contractors.apply(
+            lambda contractor: build_explanation(
+                contractor,
+                request,
+            ),
+            axis=1,
+        )
+    )
+
+    # Категория, по которой пользователь выполнял поиск
+    top_contractors["category"] = request.category
+
+    # Переименовываем anon_name -> name для API
+    top_contractors = top_contractors.rename(
+        columns={
+            "anon_name": "name",
+        }
     )
 
     return {
@@ -68,11 +103,13 @@ def recommend(request: RecommendationRequest):
         "contractors": top_contractors[
             [
                 "id",
-                "anon_name",
+                "name",
+                "category",
                 "city",
                 "price_from_kzt",
                 "languages",
                 "score",
+                "semantic_score",
                 "explanation",
             ]
         ].to_dict(orient="records"),
