@@ -12,6 +12,23 @@ api_key = os.getenv("OPENAI_API_KEY")
 
 client = OpenAI(api_key=api_key) if api_key else None
 
+MODEL = "text-embedding-3-small"
+
+# Кэш embeddings описаний подрядчиков
+description_cache: dict[str, list[float]] = {}
+
+
+def get_embeddings(texts: list[str]) -> list[list[float]]:
+    response = client.embeddings.create(
+        model=MODEL,
+        input=texts,
+    )
+
+    return [
+        item.embedding
+        for item in response.data
+    ]
+
 
 def calculate_semantic_scores(
     descriptions: list[str],
@@ -23,20 +40,37 @@ def calculate_semantic_scores(
 
     if client is not None:
         try:
-            texts = [preferences] + descriptions
-
-            response = client.embeddings.create(
-                model="text-embedding-3-small",
-                input=texts,
+            # Находим описания, embeddings которых ещё нет
+            missing_descriptions = list(
+                dict.fromkeys(
+                    description
+                    for description in descriptions
+                    if description not in description_cache
+                )
             )
 
-            embeddings = [
-                item.embedding
-                for item in response.data
-            ]
+            # Один batch-запрос для новых описаний
+            if missing_descriptions:
+                embeddings = get_embeddings(
+                    missing_descriptions
+                )
 
-            preference_embedding = embeddings[0]
-            description_embeddings = embeddings[1:]
+                for description, embedding in zip(
+                    missing_descriptions,
+                    embeddings,
+                ):
+                    description_cache[description] = embedding
+
+            # Для пользовательского пожелания embedding
+            preference_embedding = get_embeddings(
+                [preferences]
+            )[0]
+
+            # Embeddings подрядчиков уже берём из кэша
+            description_embeddings = [
+                description_cache[description]
+                for description in descriptions
+            ]
 
             similarities = cosine_similarity(
                 [preference_embedding],

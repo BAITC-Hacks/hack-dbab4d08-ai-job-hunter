@@ -21,6 +21,12 @@ app = FastAPI()
 
 contractors = load_contractors()
 
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "contractors_loaded": len(contractors),
+    }
 
 @app.post(
     "/recommend",
